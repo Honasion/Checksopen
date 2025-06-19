@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskMaster Pro - Планировщик задач</title>
+    
+    <!-- PWA Meta tags -->
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="TaskMaster Pro">
+    
+    <!-- Favicon as data URL -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'/></svg>">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* Custom styles for better PWA experience */
+        body {
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Hide scrollbars in webkit browsers */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(156, 163, 175, 0.5);
+            border-radius: 2px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(156, 163, 175, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script>
+        // Создание PWA манифеста inline
+        const manifestData = {
+            name: "TaskMaster Pro - Планировщик задач",
+            short_name: "TaskMaster",
+            description: "Профессиональный планировщик задач с уведомлениями",
+            start_url: window.location.pathname,
+            display: "standalone",
+            background_color: "#ffffff",
+            theme_color: "#6366f1",
+            orientation: "portrait-primary",
+            icons: [
+                {
+                    src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192' fill='%236366f1'><rect width='192' height='192' rx='24' fill='%23ffffff'/><path d='M48 96l24 24 48-48' stroke='%236366f1' stroke-width='12' fill='none' stroke-linecap='round' stroke-linejoin='round'/><circle cx='96' cy='96' r='80' stroke='%236366f1' stroke-width='8' fill='none'/></svg>",
+                    sizes: "192x192",
+                    type: "image/svg+xml",
+                    purpose: "any maskable"
+                },
+                {
+                    src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%236366f1'><rect width='512' height='512' rx='64' fill='%23ffffff'/><path d='M128 256l64 64 128-128' stroke='%236366f1' stroke-width='32' fill='none' stroke-linecap='round' stroke-linejoin='round'/><circle cx='256' cy='256' r='208' stroke='%236366f1' stroke-width='24' fill='none'/></svg>",
+                    sizes: "512x512", 
+                    type: "image/svg+xml",
+                    purpose: "any maskable"
+                }
+            ],
+            shortcuts: [
+                {
+                    name: "Добавить задачу",
+                    short_name: "Новая задача",
+                    description: "Быстро добавить новую задачу",
+                    url: "?action=add",
+                    icons: [{"src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M12 2v20m-10-10h20'/></svg>", "sizes": "96x96"}]
+                }
+            ],
+            categories: ["productivity", "utilities"],
+            lang: "ru"
+        };
+
+        // Создание и подключение манифеста
+        const manifestBlob = new Blob([JSON.stringify(manifestData)], {type: 'application/json'});
+        const manifestURL = URL.createObjectURL(manifestBlob);
+        const manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = manifestURL;
+        document.head.appendChild(manifestLink);
+
+        // Создание Service Worker inline
+        const swCode = `
+            const CACHE_NAME = 'taskmaster-v1';
+            
+            self.addEventListener('install', (event) => {
+                console.log('Service Worker installing...');
+                self.skipWaiting();
+            });
+
+            self.addEventListener('activate', (event) => {
+                console.log('Service Worker activating...');
+                event.waitUntil(self.clients.claim());
+            });
+
+            self.addEventListener('fetch', (event) => {
+                // Простое кеширование для основных запросов
+                if (event.request.url.includes('taskmaster') || event.request.url.includes('localhost')) {
+                    event.respondWith(
+                        caches.match(event.request).then((response) => {
+                            return response || fetch(event.request);
+                        })
+                    );
+                }
+            });
+
+            self.addEventListener('notificationclick', (event) => {
+                event.notification.close();
+                
+                // Открыть приложение при клике на уведомление
+                event.waitUntil(
+                    clients.matchAll().then((clientList) => {
+                        if (clientList.length > 0) {
+                            return clientList[0].focus();
+                        } else {
+                            return clients.openWindow('/');
+                        }
+                    })
+                );
+            });
+
+            self.addEventListener('message', (event) => {
+                if (event.data && event.data.type === 'SKIP_WAITING') {
+                    self.skipWaiting();
+                }
+            });
+        `;
+
+        // Регистрация Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                const swBlob = new Blob([swCode], {type: 'application/javascript'});
+                const swUrl = URL.createObjectURL(swBlob);
+                
+                navigator.serviceWorker.register(swUrl)
+                    .then((registration) => {
+                        console.log('✅ Service Worker зарегистрирован:', registration);
+                        
+                        // Показать кнопку установки если доступно
+                        let deferredPrompt;
+                        window.addEventListener('beforeinstallprompt', (e) => {
+                            e.preventDefault();
+                            deferredPrompt = e;
+                            
+                            // Создать кнопку установки
+                            const installButton = document.createElement('button');
+                            installButton.innerHTML = '📱 Установить приложение';
+                            installButton.style.cssText = `
+                                position: fixed;
+                                top: 20px;
+                                right: 20px;
+                                z-index: 1000;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                border: none;
+                                padding: 12px 20px;
+                                border-radius: 12px;
+                                font-size: 14px;
+                                font-weight: 600;
+                                cursor: pointer;
+                                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                                transition: all 0.3s ease;
+                            `;
+                            
+                            installButton.onmouseover = () => {
+                                installButton.style.transform = 'translateY(-2px)';
+                                installButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.3)';
+                            };
+                            
+                            installButton.onmouseout = () => {
+                                installButton.style.transform = 'translateY(0)';
+                                installButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+                            };
+                            
+                            installButton.onclick = () => {
+                                deferredPrompt.prompt();
+                                deferredPrompt.userChoice.then((choiceResult) => {
+                                    if (choiceResult.outcome === 'accepted') {
+                                        console.log('✅ Пользователь установил приложение');
+                                        installButton.remove();
+                                    }
+                                    deferredPrompt = null;
+                                });
+                            };
+                            
+                            document.body.appendChild(installButton);
+                            
+                            // Автоматически скрыть через 10 секунд
+                            setTimeout(() => {
+                                if (installButton.parentNode) {
+                                    installButton.style.opacity = '0.7';
+                                }
+                            }, 10000);
+                        });
+                        
+                        // Обработка успешной установки
+                        window.addEventListener('appinstalled', (evt) => {
+                            console.log('✅ Приложение успешно установлено!');
+                            // Можно показать приветственное сообщение
+                        });
+                    })
+                    .catch((registrationError) => {
+                        console.log('❌ Ошибка регистрации Service Worker:', registrationError);
+                    });
+            });
+        }
+    </script>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+        
+        // ВАШ ОСНОВНОЙ КОМПОНЕНТ ЗДЕСЬ (точно такой же код как в предыдущем артефакте)
+        const UltimateTaskPlanner = () => {
+          const [tasks, setTasks] = useState([]);
+          const [filter, setFilter] = useState('active');
+          const [searchTerm, setSearchTerm] = useState('');
+          const [showAddForm, setShowAddForm] = useState(false);
+          const [editingTask, setEditingTask] = useState(null);
+          const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+          const [showSettings, setShowSettings] = useState(false);
+          const [settings, setSettings] = useState({
+            notifications: true,
+            sound: true,
+            reminderMinutes: [5, 15, 60],
+            autoSort: true,
+            theme: 'light'
+          });
+          const [newTask, setNewTask] = useState({
+            title: '',
+            description: '',
+            priority: 'medium',
+            dueDate: '',
+            category: 'personal',
+            isRecurring: false,
+            recurringType: 'daily',
+            reminderEnabled: true
+          });
+
+          const notificationTimeouts = useRef(new Map());
+          const audioRef = useRef(null);
+
+          // Проверяем URL параметры для быстрых действий
+          useEffect(() => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('action') === 'add') {
+              setShowAddForm(true);
+            }
+          }, []);
+
+          // Загрузка данных из localStorage при старте
+          useEffect(() => {
+            const savedTasks = localStorage.getItem('taskmaster_tasks');
+            const savedSettings = localStorage.getItem('taskmaster_settings');
+            
+            if (savedTasks) {
+              try {
+                const parsedTasks = JSON.parse(savedTasks);
+                setTasks(parsedTasks.map(task => ({
+                  ...task,
+                  createdAt: new Date(task.createdAt),
+                  dueDate: task.dueDate ? new Date(task.dueDate) : null,
+                  completedAt: task.completedAt ? new Date(task.completedAt) : null,
+                  comments: task.comments?.map(comment => ({
+                    ...comment,
+                    timestamp: new Date(comment.timestamp)
+                  })) || []
+                })));
+              } catch (error) {
+                console.error('Ошибка при загрузке задач:', error);
+              }
+            } else {
+              // Примеры задач для первого запуска
+              const sampleTasks = [
+                {
+                  id: 1,
+                  title: '🚀 Добро пожаловать в TaskMaster Pro!',
+                  description: 'Изучите все возможности приложения. Установите его как PWA для лучшего опыта.',
+                  priority: 'high',
+                  status: 'active',
+                  category: 'personal',
+                  createdAt: new Date(),
+                  dueDate: new Date(Date.now() + 2 * 60 * 60 * 1000),
+                  reminderEnabled: true,
+                  isRecurring: false,
+                  comments: [
+                    { id: 1, text: 'Приложение готово к работе! 🎉', timestamp: new Date() }
+                  ]
+                },
+                {
+                  id: 2,
+                  title: 'Ежедневная зарядка',
+                  description: '15 минут утренней зарядки для бодрости на весь день',
+                  priority: 'medium',
+                  status: 'active',
+                  category: 'health',
+                  createdAt: new Date(),
+                  dueDate: null,
+                  reminderEnabled: true,
+                  isRecurring: true,
+                  recurringType: 'daily',
+                  comments: []
+                }
+              ];
+              setTasks(sampleTasks);
+            }
+
+            if (savedSettings) {
+              try {
+                setSettings(JSON.parse(savedSettings));
+              } catch (error) {
+                console.error('Ошибка при загрузке настроек:', error);
+              }
+            }
+          }, []);
+
+          // Сохранение данных в localStorage
+          useEffect(() => {
+            localStorage.setItem('taskmaster_tasks', JSON.stringify(tasks));
+          }, [tasks]);
+
+          useEffect(() => {
+            localStorage.setItem('taskmaster_settings', JSON.stringify(settings));
+          }, [settings]);
+
+          // Запрос разрешения на уведомления
+          useEffect(() => {
+            if ('Notification' in window && settings.notifications) {
+              if (Notification.permission === 'granted') {
+                setNotificationsEnabled(true);
+              } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then(permission => {
+                  setNotificationsEnabled(permission === 'granted');
+                });
+              }
+            }
+          }, [settings.notifications]);
+
+          // Планирование уведомлений
+          useEffect(() => {
+            notificationTimeouts.current.forEach(timeout => clearTimeout(timeout));
+            notificationTimeouts.current.clear();
+
+            if (!notificationsEnabled || !settings.notifications) return;
+
+            tasks.filter(task => task.status === 'active' && task.reminderEnabled && task.dueDate).forEach(task => {
+              const now = new Date();
+              const dueDate = new Date(task.dueDate);
+              
+              settings.reminderMinutes.forEach(minutes => {
+                const reminderTime = new Date(dueDate.getTime() - minutes * 60 * 1000);
+                const timeToReminder = reminderTime.getTime() - now.getTime();
+                
+                if (timeToReminder > 0) {
+                  const timeoutId = setTimeout(() => {
+                    showNotification(task, minutes);
+                  }, timeToReminder);
+                  
+                  notificationTimeouts.current.set(`${task.id}-${minutes}`, timeoutId);
+                }
+              });
+
+              if (dueDate.getTime() < now.getTime()) {
+                const overdueMins = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60));
+                if (overdueMins <= 60) {
+                  showNotification(task, 0, true);
+                }
+              }
+            });
+
+            return () => {
+              notificationTimeouts.current.forEach(timeout => clearTimeout(timeout));
+              notificationTimeouts.current.clear();
+            };
+          }, [tasks, notificationsEnabled, settings]);
+
+          const showNotification = (task, minutesBefore, isOverdue = false) => {
+            if (!notificationsEnabled) return;
+
+            const title = isOverdue ? '⚠️ Задача просрочена!' : '⏰ Напоминание о задаче';
+            const body = isOverdue 
+              ? `"${task.title}" должна была быть выполнена`
+              : minutesBefore === 0 
+                ? `Время выполнить: "${task.title}"`
+                : `Через ${minutesBefore} мин: "${task.title}"`;
+
+            const notification = new Notification(title, {
+              body,
+              icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'/></svg>",
+              badge: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'/></svg>",
+              tag: `task-${task.id}`,
+              requireInteraction: isOverdue,
+              silent: !settings.sound
+            });
+
+            notification.onclick = () => {
+              window.focus();
+              notification.close();
+            };
+
+            setTimeout(() => notification.close(), 10000);
+          };
+
+          const addTask = () => {
+            if (!newTask.title.trim()) return;
+            
+            const task = {
+              id: Date.now(),
+              ...newTask,
+              status: 'active',
+              createdAt: new Date(),
+              dueDate: newTask.dueDate ? new Date(newTask.dueDate) : null,
+              comments: [],
+              lastRecurrence: newTask.isRecurring ? new Date() : null
+            };
+            
+            setTasks([task, ...tasks]);
+            setNewTask({ 
+              title: '', 
+              description: '', 
+              priority: 'medium', 
+              dueDate: '', 
+              category: 'personal',
+              isRecurring: false,
+              recurringType: 'daily',
+              reminderEnabled: true
+            });
+            setShowAddForm(false);
+            
+            // Очистить URL параметр
+            if (window.location.search.includes('action=add')) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+          };
+
+          const updateTask = (taskId, updates) => {
+            setTasks(tasks.map(task => 
+              task.id === taskId ? { ...task, ...updates } : task
+            ));
+          };
+
+          const addComment = (taskId, commentText) => {
+            if (!commentText.trim()) return;
+            
+            const comment = {
+              id: Date.now(),
+              text: commentText,
+              timestamp: new Date()
+            };
+            
+            updateTask(taskId, {
+              comments: [...(tasks.find(t => t.id === taskId)?.comments || []), comment]
+            });
+          };
+
+          const toggleTaskStatus = (taskId) => {
+            const task = tasks.find(t => t.id === taskId);
+            const newStatus = task.status === 'active' ? 'completed' : 'active';
+            
+            let updates = { 
+              status: newStatus,
+              completedAt: newStatus === 'completed' ? new Date() : null
+            };
+
+            if (task.isRecurring && newStatus === 'completed') {
+              const nextDueDate = calculateNextRecurrence(task.dueDate, task.recurringType);
+              updates = {
+                ...updates,
+                status: 'active',
+                completedAt: null,
+                dueDate: nextDueDate,
+                lastRecurrence: new Date(),
+                comments: [...task.comments, {
+                  id: Date.now(),
+                  text: `✅ Выполнено повторение ${formatDate(new Date())}`,
+                  timestamp: new Date()
+                }]
+              };
+            }
+            
+            updateTask(taskId, updates);
+          };
+
+          const calculateNextRecurrence = (currentDate, type) => {
+            if (!currentDate) return new Date();
+            
+            const nextDate = new Date(currentDate);
+            switch(type) {
+              case 'daily':
+                nextDate.setDate(nextDate.getDate() + 1);
+                break;
+              case 'weekly':
+                nextDate.setDate(nextDate.getDate() + 7);
+                break;
+              case 'monthly':
+                nextDate.setMonth(nextDate.getMonth() + 1);
+                break;
+            }
+            return nextDate;
+          };
+
+          const deleteTask = (taskId) => {
+            setTasks(tasks.filter(task => task.id !== taskId));
+          };
+
+          const exportTasks = () => {
+            const dataStr = JSON.stringify({ tasks, settings, exportDate: new Date() }, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `taskmaster-backup-${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+          };
+
+          const importTasks = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              try {
+                const data = JSON.parse(e.target.result);
+                if (data.tasks) {
+                  const importedTasks = data.tasks.map(task => ({
+                    ...task,
+                    id: task.id + Date.now(),
+                    createdAt: new Date(task.createdAt),
+                    dueDate: task.dueDate ? new Date(task.dueDate) : null,
+                    completedAt: task.completedAt ? new Date(task.completedAt) : null,
+                    comments: task.comments?.map(comment => ({
+                      ...comment,
+                      timestamp: new Date(comment.timestamp)
+                    })) || []
+                  }));
+                  setTasks([...importedTasks, ...tasks]);
+                }
+                if (data.settings) {
+                  setSettings({ ...settings, ...data.settings });
+                }
+                alert('Данные успешно импортированы!');
+              } catch (error) {
+                alert('Ошибка при импорте файла');
+              }
+            };
+            reader.readAsText(file);
+          };
+
+          const sortTasks = (tasksToSort) => {
+            if (!settings.autoSort) return tasksToSort;
+            
+            return [...tasksToSort].sort((a, b) => {
+              const aOverdue = a.dueDate && new Date(a.dueDate) < new Date() && a.status === 'active';
+              const bOverdue = b.dueDate && new Date(b.dueDate) < new Date() && b.status === 'active';
+              if (aOverdue && !bOverdue) return -1;
+              if (!aOverdue && bOverdue) return 1;
+              
+              const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+              const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
+              if (priorityDiff !== 0) return priorityDiff;
+              
+              if (a.dueDate && b.dueDate) {
+                return new Date(a.dueDate) - new Date(b.dueDate);
+              }
+              if (a.dueDate && !b.dueDate) return -1;
+              if (!a.dueDate && b.dueDate) return 1;
+              
+              return new Date(b.createdAt) - new Date(a.createdAt);
+            });
+          };
+
+          const filteredTasks = sortTasks(tasks.filter(task => {
+            const matchesFilter = filter === 'all' || 
+                                 (filter === 'active' && task.status === 'active' && !task.isRecurring) ||
+                                 (filter === 'completed' && task.status === 'completed') ||
+                                 (filter === 'recurring' && task.isRecurring);
+            
+            const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                 task.description.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            return matchesFilter && matchesSearch;
+          }));
+
+          const getPriorityColor = (priority) => {
+            switch(priority) {
+              case 'high': return 'bg-red-500';
+              case 'medium': return 'bg-yellow-500';
+              case 'low': return 'bg-green-500';
+              default: return 'bg-gray-500';
+            }
+          };
+
+          const getCategoryIcon = (category) => {
+            switch(category) {
+              case 'work': return '💼';
+              case 'personal': return '🏠';
+              case 'health': return '💪';
+              case 'study': return '📚';
+              default: return '📝';
+            }
+          };
+
+          const formatDate = (date) => {
+            if (!date) return '';
+            return new Intl.DateTimeFormat('ru-RU', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            }).format(new Date(date));
+          };
+
+          const isOverdue = (dueDate) => {
+            return dueDate && new Date(dueDate) < new Date();
+          };
+
+          const getTaskStats = () => {
+            const total = tasks.length;
+            const active = tasks.filter(t => t.status === 'active').length;
+            const completed = tasks.filter(t => t.status === 'completed').length;
+            const overdue = tasks.filter(t => isOverdue(t.dueDate) && t.status === 'active').length;
+            const recurring = tasks.filter(t => t.isRecurring).length;
+            
+            return { total, active, completed, overdue, recurring };
+          };
+
+          const stats = getTaskStats();
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
+              {/* Audio для уведомлений */}
+              <audio ref={audioRef} preload="auto">
+                <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmgfDGK/8+OZURE" type="audio/wav" />
+              </audio>
+
+              {/* Header */}
+              <div className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-10">
+                <div className="max-w-4xl mx-auto px-4 py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-2 rounded-xl">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                          TaskMaster Pro PWA
+                        </h1>
+                        <div className="flex items-center space-x-4 text-sm text-gray-600">
+                          <span>📊 {stats.active} активных</span>
+                          {stats.overdue > 0 && (
+                            <span className="text-red-500 font-medium">⚠️ {stats.overdue} просрочено</span>
+                          )}
+                          <span>🔄 {stats.recurring} постоянных</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setShowSettings(true)}
+                        className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors duration-200"
+                        title="Настройки"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </button>
+                      
+                      <button
+                        onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                        className={`p-2 rounded-lg transition-colors duration-200 ${
+                          notificationsEnabled 
+                            ? 'text-green-600 bg-green-50' 
+                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                        }`}
+                        title={notificationsEnabled ? 'Уведомления включены' : 'Уведомления отключены'}
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          {notificationsEnabled ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                          ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                          )}
+                        </svg>
+                      </button>
+                      
+                      <button
+                        onClick={() => setShowAddForm(true)}
+                        className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-xl flex items-center space-x-2 hover:shadow-lg transform hover:scale-105 transition-all duration-200"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <span>Новая задача</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="max-w-4xl mx-auto px-4 py-6">
+                {/* Controls */}
+                <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 mb-6 border border-gray-200">
+                  <div className="flex flex-col md:flex-row gap-4">
+                    {/* Search */}
+                    <div className="flex-1 relative">
+                      <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      <input
+                        type="text"
+                        placeholder="Поиск задач..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    
+                    {/* Filter */}
+                    <div className="flex space-x-2">
+                      {[
+                        { key: 'active', label: 'Активные', count: stats.active },
+                        { key: 'recurring', label: 'Постоянные', count: stats.recurring },
+                        { key: 'completed', label: 'Завершённые', count: stats.completed },
+                        { key: 'all', label: 'Все', count: stats.total }
+                      ].map(({ key, label, count }) => (
+                        <button
+                          key={key}
+                          onClick={() => setFilter(key)}
+                          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all duration-200 relative ${
+                            filter === key
+                              ? 'bg-indigo-500 text-white shadow-lg'
+                              : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
+                          }`}
+                        >
+                          <span>{label}</span>
+                          {count > 0 && (
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              filter === key ? 'bg-white/20' : 'bg-gray-100'
+                            }`}>
+                              {count}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Task List */}
+                <div className="space-y-4">
+                  {filteredTasks.map(task => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onToggleStatus={toggleTaskStatus}
+                      onAddComment={addComment}
+                      onDelete={deleteTask}
+                      onEdit={setEditingTask}
+                      getPriorityColor={getPriorityColor}
+                      getCategoryIcon={getCategoryIcon}
+                      formatDate={formatDate}
+                      isOverdue={isOverdue}
+                    />
+                  ))}
+                  
+                  {filteredTasks.length === 0 && (
+                    <div className="text-center py-12">
+                      <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <p className="text-gray-500 text-lg">
+                        {filter === 'completed' ? 'Нет завершённых задач' : 
+                         filter === 'recurring' ? 'Нет постоянных задач' : 'Нет активных задач'}
+                      </p>
+                      <p className="text-gray-400 text-sm mt-2">Создайте первую задачу, чтобы начать!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Modals будут здесь - AddTaskModal и SettingsModal */}
+              {showAddForm && (
+                <AddTaskModal
+                  newTask={newTask}
+                  setNewTask={setNewTask}
+                  onAdd={addTask}
+                  onClose={() => setShowAddForm(false)}
+                />
+              )}
+
+              {showSettings && (
+                <SettingsModal
+                  settings={settings}
+                  setSettings={setSettings}
+                  onClose={() => setShowSettings(false)}
+                  onExport={exportTasks}
+                  onImport={importTasks}
+                  notificationsEnabled={notificationsEnabled}
+                  stats={stats}
+                />
+              )}
+            </div>
+          );
+        };
+
+        // Компоненты TaskCard, AddTaskModal, SettingsModal (сокращенные версии)
+        const TaskCard = ({ task, onToggleStatus, onAddComment, onDelete, getPriorityColor, getCategoryIcon, formatDate, isOverdue }) => {
+          const [showComments, setShowComments] = useState(false);
+          const [newComment, setNewComment] = useState('');
+
+          const handleAddComment = () => {
+            onAddComment(task.id, newComment);
+            setNewComment('');
+          };
+
+          const isTaskOverdue = isOverdue(task.dueDate) && task.status === 'active';
+
+          return (
+            <div className={`bg-white/80 backdrop-blur-sm rounded-2xl border-l-4 ${getPriorityColor(task.priority)} shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden ${
+              isTaskOverdue ? 'ring-2 ring-red-200 bg-red-50/50' : ''
+            }`}>
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-start space-x-3 flex-1">
+                    <button
+                      onClick={() => onToggleStatus(task.id)}
+                      className={`mt-1 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 ${
+                        task.status === 'completed'
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : 'border-gray-300 hover:border-indigo-500 hover:bg-indigo-50'
+                      }`}
+                    >
+                      {task.status === 'completed' && (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                    
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className="text-lg">{getCategoryIcon(task.category)}</span>
+                        {task.isRecurring && (
+                          <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Повторяющаяся задача">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        )}
+                        {task.reminderEnabled && (
+                          <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Напоминания включены">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                          </svg>
+                        )}
+                        {isTaskOverdue && (
+                          <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Просрочено!">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                          </svg>
+                        )}
+                        <h3 className={`text-lg font-semibold ${task.status === 'completed' ? 'line-through text-gray-500' : isTaskOverdue ? 'text-red-700' : 'text-gray-800'}`}>
+                          {task.title}
+                        </h3>
+                      </div>
+                      
+                      {task.description && (
+                        <p className={`text-gray-600 mb-3 ${task.status === 'completed' ? 'line-through' : ''}`}>
+                          {task.description}
+                        </p>
+                      )}
+                      
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
+                        <span className="flex items-center space-x-1">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          <span>Создано: {formatDate(task.createdAt)}</span>
+                        </span>
+                        
+                        {task.dueDate && (
+                          <span className={`flex items-center space-x-1 ${isTaskOverdue ? 'text-red-500 font-medium' : ''}`}>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span>
+                              {isTaskOverdue ? 'Просрочено: ' : 'Срок: '}
+                              {formatDate(task.dueDate)}
+                            </span>
+                          </span>
+                        )}
+                        
+                        {task.isRecurring && (
+                          <span className="flex items-center space-x-1 text-blue-600">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span>
+                              {task.recurringType === 'daily' ? 'Ежедневно' :
+                               task.recurringType === 'weekly' ? 'Еженедельно' : 'Ежемесячно'}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2 ml-4">
+                    <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} title={`Приоритет: ${task.priority}`}></div>
+                    <button
+                      onClick={() => setShowComments(!showComments)}
+                      className="relative p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors duration-200"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      {task.comments?.length > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-indigo-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                          {task.comments.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => onDelete(task.id)}
+                      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Comments Section */}
+              {showComments && (
+                <div className="border-t border-gray-100 bg-gray-50/50 p-4">
+                  <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">
+                    {task.comments?.map(comment => (
+                      <div key={comment.id} className="bg-white rounded-lg p-3 border border-gray-100">
+                        <p className="text-gray-800 text-sm mb-1">{comment.text}</p>
+                        <p className="text-xs text-gray-500">{formatDate(comment.timestamp)}</p>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      placeholder="Добавить комментарий..."
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleAddComment()}
+                      className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={handleAddComment}
+                      disabled={!newComment.trim()}
+                      className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        // Остальные компоненты (AddTaskModal, SettingsModal) - используйте те же из предыдущего кода
+        const AddTaskModal = ({ newTask, setNewTask, onAdd, onClose }) => {
+          return (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-bold text-gray-800">Новая задача</h2>
+                  <button
+                    onClick={onClose}
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Название задачи</label>
+                    <input
+                      type="text"
+                      value={newTask.title}
+                      onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                      placeholder="Введите название задачи..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      autoFocus
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Описание</label>
+                    <textarea
+                      value={newTask.description}
+                      onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                      placeholder="Описание задачи (необязательно)..."
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Приоритет</label>
+                      <select
+                        value={newTask.priority}
+                        onChange={(e) => setNewTask({ ...newTask, priority: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      >
+                        <option value="low">🟢 Низкий</option>
+                        <option value="medium">🟡 Средний</option>
+                        <option value="high">🔴 Высокий</option>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Категория</label>
+                      <select
+                        value={newTask.category}
+                        onChange={(e) => setNewTask({ ...newTask, category: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      >
+                        <option value="personal">🏠 Личное</option>
+                        <option value="work">💼 Работа</option>
+                        <option value="health">💪 Здоровье</option>
+                        <option value="study">📚 Учёба</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Срок выполнения</label>
+                    <input
+                      type="datetime-local"
+                      value={newTask.dueDate}
+                      onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="checkbox"
+                        id="isRecurring"
+                        checked={newTask.isRecurring}
+                        onChange={(e) => setNewTask({ ...newTask, isRecurring: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      <label htmlFor="isRecurring" className="text-sm font-medium text-gray-700">
+                        🔄 Повторяющаяся задача
+                      </label>
+                    </div>
+
+                    {newTask.isRecurring && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Частота повторения</label>
+                        <select
+                          value={newTask.recurringType}
+                          onChange={(e) => setNewTask({ ...newTask, recurringType: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                          <option value="daily">Ежедневно</option>
+                          <option value="weekly">Еженедельно</option>
+                          <option value="monthly">Ежемесячно</option>
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="checkbox"
+                        id="reminderEnabled"
+                        checked={newTask.reminderEnabled}
+                        onChange={(e) => setNewTask({ ...newTask, reminderEnabled: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      <label htmlFor="reminderEnabled" className="text-sm font-medium text-gray-700">
+                        🔔 Включить напоминания
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    onClick={onClose}
+                    className="flex-1 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    onClick={onAdd}
+                    disabled={!newTask.title.trim()}
+                    className="flex-1 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                  >
+                    Создать
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const SettingsModal = ({ settings, setSettings, onClose, onExport, onImport, notificationsEnabled, stats }) => {
+          const fileInputRef = useRef(null);
+
+          return (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-bold text-gray-800">⚙️ Настройки</h2>
+                  <button
+                    onClick={onClose}
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                <div className="space-y-6">
+                  {/* Статистика */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h3 className="font-semibold text-gray-800 mb-3">📊 Статистика</h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-indigo-600">{stats.total}</div>
+                        <div className="text-gray-600">Всего задач</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
+                        <div className="text-gray-600">Завершено</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-blue-600">{stats.recurring}</div>
+                        <div className="text-gray-600">Постоянных</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-red-600">{stats.overdue}</div>
+                        <div className="text-gray-600">Просрочено</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Уведомления */}
+                  <div>
+                    <h3 className="font-semibold text-gray-800 mb-3">🔔 Уведомления</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-700">Браузерные уведомления</span>
+                        <span className={`text-sm px-2 py-1 rounded ${
+                          notificationsEnabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {notificationsEnabled ? 'Включены' : 'Отключены'}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-700">Звуковые сигналы</span>
+                        <input
+                          type="checkbox"
+                          checked={settings.sound}
+                          onChange={(e) => setSettings({ ...settings, sound: e.target.checked })}
+                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Сортировка */}
+                  <div>
+                    <h3 className="font-semibold text-gray-800 mb-3">📋 Отображение</h3>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-700">Умная сортировка</span>
+                      <input
+                        type="checkbox"
+                        checked={settings.autoSort}
+                        onChange={(e) => setSettings({ ...settings, autoSort: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Автоматически поднимает просроченные и высокоприоритетные задачи
+                    </p>
+                  </div>
+
+                  {/* Резервное копирование */}
+                  <div>
+                    <h3 className="font-semibold text-gray-800 mb-3">💾 Резервное копирование</h3>
+                    <div className="space-y-3">
+                      <button
+                        onClick={onExport}
+                        className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors duration-200"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>Экспорт данных</span>
+                      </button>
+                      
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors duration-200"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span>Импорт данных</span>
+                      </button>
+                      
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={onImport}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+
+                  {/* PWA Info */}
+                  <div className="bg-indigo-50 rounded-lg p-4">
+                    <h3 className="font-semibold text-indigo-800 mb-2">📱 PWA приложение</h3>
+                    <p className="text-sm text-indigo-700 mb-2">
+                      TaskMaster Pro установлен как PWA! Работает офлайн и отправляет уведомления.
+                    </p>
+                    <p className="text-xs text-indigo-600">
+                      ✅ Автономная работа<br/>
+                      ✅ Системные уведомления<br/>
+                      ✅ Быстрый запуск<br/>
+                      ✅ Автообновления
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={onClose}
+                    className="px-6 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors duration-200"
+                  >
+                    Готово
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // Рендер приложения
+        ReactDOM.render(<UltimateTaskPlanner />, document.getElementById('root'));
+    </script>
+</body>
+</html>
